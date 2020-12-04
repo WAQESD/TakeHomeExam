@@ -71,6 +71,95 @@ print(trade['amount'].sum())
 
 #### (x-axis: 10 minutes interval, y1-axis: Sell, y2-axis: Buy)
 
+```python
+import pandas as pd
+import numpy as np
+from matplotlib import pyplot as plt
+
+#timestamp, quantity, price, fee, amount, side
+trade = pd.read_csv('../Data/2018-07-trade.csv')
+
+# trade data를 인자로 받아 10분 구간의 timestamp와 구간 동안 buy와 sell의 횟수를 column으로 하는 dataframe을 반환 하는 함수.
+# timestamp는 구간이 끝나는 지점으로 표현.
+# ex) 2018-07-01 02:00:00 ~ 2018-07-01 02:10:00을 2018-07-01 02:10:00로 표현.
+def Transaction(trade):
+    start = pd.Timestamp('2018-07-01 02:10:00')
+    end = pd.Timestamp('2018-07-03 00:10:00')
+    transaction = {'timestamp':[], 'Sell':[], 'Buy':[]}
+    i = 0
+
+    while(end > start):
+        buy = 0
+        sell = 0
+        while(i < len(trade) and start > pd.Timestamp(trade['timestamp'][i])):
+            if trade['side'][i] == 0:
+                buy += 1
+            else:
+                sell += 1           
+            i += 1
+        transaction['timestamp'].append(start)
+        transaction['Sell'].append(sell)
+        transaction['Buy'].append(buy)
+        start = pd.Timestamp(start.value + 600000000000)
+    return pd.DataFrame(transaction)
+
+def timestamp_xticks(transaction):
+    tmp = []
+    for i in range(len(transaction)):
+        if transaction['Buy'][i] or transaction['Sell'][i]:
+            tmp.append(i)
+    return tmp
+```
+
+```python
+# 10분 단위로 나눈 timestamp를 모두 X축으로 사용한 그래프.
+# 거래가 있는 구간에만 timestamp를 표시.
+transaction = Transaction(trade)
+
+x = np.arange(len(transaction))
+
+fig, ax = plt.subplots(figsize=(60, 15))
+width = 0.35
+ax.bar(x - width/2, transaction['Buy'], width, label='Buy')
+ax.bar(x + width/2, transaction['Sell'], width, label='Sell')
+
+arange = timestamp_xticks(transaction)
+ax.set_xticks(arange)
+ax.set_xticklabels(transaction['timestamp'][arange],rotation=90)
+
+ax.set_yticks(np.arange(0,22,2))
+ax.legend()
+
+plt.savefig('../Images/Task2_1.png', dpi = 300)
+```
+
+![](Images/Task2_1.png)
+
+
+
+```python
+#거래가 없는 구간이 많아 거래가 있는 구간만 추출해 X축으로 사용한 그래프
+transaction = Transaction(trade)
+arange = timestamp_xticks(transaction)
+transaction = transaction.loc[timestamp_xticks(transaction)]
+x = np.arange(len(transaction))  
+
+fig, ax = plt.subplots(figsize=(40, 15))
+width = 0.35
+ax.bar(x - width/2, transaction['Buy'], width, label='Buy')
+ax.bar(x + width/2, transaction['Sell'], width, label='Sell')
+
+ax.set_xticks(np.arange(len(transaction)))
+ax.set_xticklabels(transaction['timestamp'],rotation=90)
+
+ax.set_yticks(np.arange(0,22,2))
+ax.legend()
+
+plt.savefig('../Images/Task2_2.png', dpi = 300)
+```
+
+![](Images/Task2_2.png)
+
 
 
 ## Task 3
@@ -110,4 +199,3 @@ print(trade['amount'].sum())
 
 #### And show how to use ML or Neural Network (using Keras, perhaps) to create the learning agent for cryptocurrency transaction. 
 
-### 
