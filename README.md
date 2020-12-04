@@ -175,19 +175,160 @@ plt.savefig('../Images/Task2_2.png', dpi = 300)
 #### In order to compute these two, check out the following:
 
 * How to compute MidPrice
-  MidPrice = (top_ask_price + top_bid_price) / 2 //ask means Sell, bid means Buy.
+  MidPrice = (top_ask_price + top_bid_price) / 2  //ask means Sell, bid means Buy.
+
+
 
 * How to compute BookFeature 
-
-  askQty = quant_orderbook_ask.values.avg()  //average quantity of all levels for Sell
+askQty = quant_orderbook_ask.values.avg()  //average quantity of all levels for Sell
   bidQty = quant_orderbook_bid.values.avg() //likewise for Buy
   askPx = price_orderbook_ask.values.avg() //average price of all levels for Sell
   bidPx = price_orderbook_bid.values.avg() //likewise for Buy
   book_price = (((askQty*bidPx)/bidQty) + ((bidQty*askPx)/askQty)) / (bidQty+askQty)
   BookFeature = (book_price - mid_price)
 
-* How to compute Alpha:
+
+
+* How to compute Alpha
   Alpha = 0.002 * BookFeature * MidPrice
+
+```python
+import pandas as pd
+import numpy as np
+
+#timestamp, quantity, price, fee, amount, side
+trade = pd.read_csv('../Data/2018-07-trade.csv')
+
+#price, quantity, type(0 = buy, 1 = sell), timestamp
+#timestamp로 구별이 가능하기 때문에 두 데이터를 하나로 합쳐 사용한다.
+orderbook = pd.concat([pd.read_csv('../Data/2018-07-01-orderbook.csv'), pd.read_csv('../Data/2018-07-02-orderbook.csv')])
+
+
+print(orderbook['timestamp'])
+#0          2018-07-01 00:00:00.125005
+#1          2018-07-01 00:00:00.125005
+#2          2018-07-01 00:00:00.125005
+#3          2018-07-01 00:00:00.125005
+#4          2018-07-01 00:00:00.125005
+
+# orderbook data의 timestamp가 소수점까지 표현되는 상태.
+# trade data의 timestamp와 같은 경우를 확인 해야하기 때문에 같은 형식으로 만들어 줄 필요가 있다.
+# 소수점 버림을 했을때 trade의 timestamp와 orderbook의 timestamp가 일치하지 않는 data가 trade에 2개가 있어 반올림을 사용하였다.
+# 반올림 시에도 1개의 data는 일치하지 않았다.
+
+# string type의 날짜를 반올림 하기 위해 사용하는 함수.
+def round_timestamp(t):
+    v = pd.Timestamp(t).value
+    if v % 1000000000 >= 500000000:
+        v = v + 1000000000
+    return str(pd.Timestamp(v))[:-7]
+
+orderbook['timestamp'] = orderbook['timestamp'].apply(round_timestamp)
+```
+
+```python
+#isin을 사용해 trade의 timestamp와 같은 시각의 orderbook data를 확인 할 수 있다.
+orders = orderbook[orderbook['timestamp'].isin([trade['timestamp'][0]])]
+print(orders)
+
+"""
+          price  quantity  type            timestamp
+224160  7108000    0.9670     0  2018-07-01 02:04:44
+224161  7107000    0.5481     0  2018-07-01 02:04:44
+224162  7106000    1.2500     0  2018-07-01 02:04:44
+224163  7105000    0.9515     0  2018-07-01 02:04:44
+224164  7103000    0.0682     0  2018-07-01 02:04:44
+224165  7100000    1.0001     0  2018-07-01 02:04:44
+224166  7098000    0.0014     0  2018-07-01 02:04:44
+224167  7097000    0.0014     0  2018-07-01 02:04:44
+224168  7096000    0.0014     0  2018-07-01 02:04:44
+224169  7095000    3.4379     0  2018-07-01 02:04:44
+224170  7094000    1.3014     0  2018-07-01 02:04:44
+224171  7091000    0.0007     0  2018-07-01 02:04:44
+224172  7090000    0.2024     0  2018-07-01 02:04:44
+224173  7087000    0.0899     0  2018-07-01 02:04:44
+224174  7086000    0.0920     0  2018-07-01 02:04:44
+224175  7109000    0.0800     1  2018-07-01 02:04:44
+224176  7113000    0.1967     1  2018-07-01 02:04:44
+224177  7114000    0.6874     1  2018-07-01 02:04:44
+224178  7115000    0.5875     1  2018-07-01 02:04:44
+224179  7118000    0.1055     1  2018-07-01 02:04:44
+224180  7120000    0.8414     1  2018-07-01 02:04:44
+224181  7121000    0.2960     1  2018-07-01 02:04:44
+224182  7123000    0.2960     1  2018-07-01 02:04:44
+224183  7125000    0.4172     1  2018-07-01 02:04:44
+224184  7128000    1.0900     1  2018-07-01 02:04:44
+224185  7131000    0.1981     1  2018-07-01 02:04:44
+224186  7134000    0.0010     1  2018-07-01 02:04:44
+224187  7135000    1.0224     1  2018-07-01 02:04:44
+224188  7136000    0.0891     1  2018-07-01 02:04:44
+224189  7138000    0.0021     1  2018-07-01 02:04:44
+"""
+```
+
+```python
+# trade와 orderbook 데이터를 받아 timestamp, price, midprice, bookfeature, alpha, side를 column으로 하는 new_trade dataframe을 반환
+def MakeNewTrade(trade, orderbook):
+    midPrice = []
+    bookFeature = []
+    alpha = []
+    err = []
+    for i in range(len(trade)):
+        orders = orderbook[orderbook['timestamp'].isin([trade['timestamp'][i]])]
+        if(not len(orders)):
+            err.append(i)
+            continue
+        # mid_price = (top_ask_price + top_bid_price) / 2
+        mid_price = orders.groupby('type').min()['price'].sum() / 2
+        midPrice.append(mid_price)
+
+        # askQty = quant_orderbook_ask.values.avg()  //average quantity of all levels for Sell
+        # bidQty = quant_orderbook_bid.values.avg() //likewise for Buy
+        bidQty, askQty = orders.groupby('type').mean()['quantity']
+
+        # askPx = price_orderbook_ask.values.avg() //average price of all levels for Sell
+        # bidPx = price_orderbook_bid.values.avg() //likewise for Buy
+        bidPx, askPx = orders.groupby('type').mean()['price']
+
+        # book_price = (((askQty*bidPx)/bidQty) + ((bidQty*askPx)/askQty)) / (bidQty+askQty)
+        book_price = (((askQty*bidPx)/bidQty) + ((bidQty*askPx)/askQty)) / (bidQty+askQty)
+
+        # BookFeature = (book_price - mid_price)
+        BookFeature = (book_price - mid_price)
+        bookFeature.append(BookFeature)
+        
+        # Alpha = 0.002 * BookFeature * MidPrice
+        Alpha = 0.002 * BookFeature * mid_price
+        alpha.append(Alpha)
+    trade = trade.drop(err, axis=0)
+    newTrade = trade.drop(['quantity','fee','amount'], axis=1)
+    newTrade['midprice'] = midPrice
+    newTrade['bookfeature'] = bookFeature
+    newTrade['alpha'] = alpha
+    return newTrade
+```
+
+```python
+newTrade = MakeNewTrade(trade, orderbook)
+print(newTrade)
+"""
+               timestamp    price  side   midprice   bookfeature         alpha
+0    2018-07-01 02:04:44  7109000     0  7097500.0  8.240648e+06  1.169760e+11
+1    2018-07-01 02:05:54  7112000     1  7100000.0  2.816755e+06  3.999792e+10
+2    2018-07-01 02:42:54  7094000     0  7075000.0  8.322289e+06  1.177604e+11
+3    2018-07-01 02:44:44  7094000     1  7076500.0  5.985209e+06  8.470867e+10
+4    2018-07-01 02:46:33  7094000     1  7074500.0  3.317512e+06  4.693947e+10
+..                   ...      ...   ...        ...           ...           ...
+525  2018-07-02 23:38:47  7302000     0  7287500.0  8.991401e+06  1.310497e+11
+526  2018-07-02 23:38:47  7302000     0  7287500.0  8.991401e+06  1.310497e+11
+527  2018-07-02 23:42:53  7313000     1  7297500.0  1.543251e+06  2.252375e+10
+528  2018-07-02 23:42:53  7313000     1  7297500.0  1.543251e+06  2.252375e+10
+529  2018-07-02 23:42:57  7310000     1  7298500.0  1.758970e+06  2.567568e+10
+"""
+
+# 2018-07-trade-new.csv 파일로 새로운 column을 추가한 data를 저장.
+newTrade.to_csv("../Data/2018-07-trade-new.csv", mode='w')
+```
 
 
 
