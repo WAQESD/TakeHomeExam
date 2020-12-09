@@ -267,12 +267,39 @@ print(orders)
 ```
 
 ```python
-# trade와 orderbook 데이터를 받아 timestamp, price, midprice, bookfeature, alpha, side를 column으로 하는 new_trade dataframe을 반환
+# 특정 timestamp이후 5분간의 data에서 price의 최대값과 최솟값을 반환하는 함수
+def min_max_price(start_timestamp):
+    t = pd.Timestamp(start_timestamp)
+    end_timestamp = pd.Timestamp(t.value + 30000000000) # 30000000000 = 5분
+    max_price = 0
+    min_price = 10000000
+    while(t < end_timestamp):
+        str_t = str(t)
+        orders = orderbook[orderbook['timestamp'].isin([str_t])]
+        if(not len(orders)):
+            t_value = t.value + 1000000000
+            t = pd.Timestamp(t_value)
+            continue
+        minprice = orders['price'].min()
+        maxprice = orders['price'].max()
+        t_value = t.value + 1000000000
+        t = pd.Timestamp(t_value)
+        if (maxprice > max_price):
+            max_price = maxprice
+        elif (minprice < min_price):
+            min_price = minprice
+    return {"timestamp":start_timestamp, "min_price":min_price, "max_price":max_price}
+
+
+# trade와 orderbook 데이터를 받아 timestamp, price, midprice, bookfeature, alpha, side, minprice, maxprice를 column으로 하는 new_trade dataframe을 반환
+# Task4에서 예측값의 정답값으로 사용하기 위해서 현 timestamp이후 5분간의 price data중 최댓값과 최솟값을 구해 column에 추가하였다.
 def MakeNewTrade(trade, orderbook):
     midPrice = []
     bookFeature = []
     alpha = []
     err = []
+    min_price = []
+    max_price = []
     for i in range(len(trade)):
         orders = orderbook[orderbook['timestamp'].isin([trade['timestamp'][i]])]
         if(not len(orders)):
@@ -300,11 +327,19 @@ def MakeNewTrade(trade, orderbook):
         # Alpha = 0.002 * BookFeature * MidPrice
         Alpha = 0.002 * BookFeature * mid_price
         alpha.append(Alpha)
+        
+        # timestamp이후 5분 동안의 midprice의 최댓값과 최솟값
+        min_max =  min_max_price(trade['timestamp'][i])
+        min_price.append(min_max['min_price'])
+        max_price.append(min_max['max_price'])
+        
     trade = trade.drop(err, axis=0)
     newTrade = trade.drop(['quantity','fee','amount'], axis=1)
     newTrade['midprice'] = midPrice
     newTrade['bookfeature'] = bookFeature
     newTrade['alpha'] = alpha
+    newTrade['minprice'] = min_price
+    newTrade['maxprice'] = max_price
     return newTrade
 ```
 
@@ -330,8 +365,6 @@ print(newTrade)
 newTrade.to_csv("../Data/2018-07-trade-new.csv", mode='w')
 ```
 
-
-
 ## Task 4
 
 #### Explain your plan how you use the data file from Task 3 to create the smart trading agent. 
@@ -340,3 +373,119 @@ newTrade.to_csv("../Data/2018-07-trade-new.csv", mode='w')
 
 #### And show how to use ML or Neural Network (using Keras, perhaps) to create the learning agent for cryptocurrency transaction. 
 
+```python
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
+#현 시점이후로 5분간 price값의 최댓값과 최솟값을 예측하기 위해 사이킷런의 LinearRegression을 사용하였다.
+```
+
+```python
+#Task 3에서 새로운 column으로 만든 data를 불러온다.
+#timestamp, price, sidem, mideprice, bookfeature, alpha, minprice, maxprice
+trade = pd.read_csv('../Data/2018-07-trade-new.csv')
+
+#buy, sell을 한 시점 이후 5분간의 data의 price값들의 min값과 max값을 예측하도록 학습을 한 후에
+#예측값과 현재 시점의 가격을 비교해 buy와 sell의 행동을 실행할지 결정한다.
+
+#100개의 data를 train에 사용하고 나머지 429개의 data를 test에 사용한다.
+#timestamp는 feature로 사용하지 않기때문에 data는 순차적으로 나눠서 사용하여도 크게 상관없을것이라고 판단했다.
+train = trade[:100]
+test = trade[100:]
+
+# min값을 예측하도록 나눈 데이터, feature는 구매 시점에서 알 수 있는 price, midprice, bookfeature, alpha를 사용한다.
+min_train_X = train.filter(['price','midprice','bookfeature','alpha'])
+min_train_Y = train.filter(['minprice']).to_numpy().ravel()
+
+max_train_X = train.filter(['price','midprice','bookfeature','alpha'])
+max_train_Y = train.filter(['maxprice']).to_numpy().ravel()
+```
+
+```python
+#학습 data를 이용해 학습
+min_reg = LinearRegression().fit(min_train_X, min_train_Y)
+max_reg = LinearRegression().fit(max_train_X, max_train_Y)
+
+#min값 예측 정확도를 확인하기 위한 data
+min_test_X = test.filter(['price','midprice','bookfeature','alpha'])
+min_test_Y = test.filter(['minprice']).to_numpy().ravel()
+
+#max값 예측 정확도를 확인하기 위한 data
+max_test_X = test.filter(['price','midprice','bookfeature','alpha'])
+max_test_Y = test.filter(['maxprice']).to_numpy().ravel()
+```
+
+```python
+#각 예측의 정확도
+print("min score : ", min_reg.score(min_test_X, min_test_Y))
+print("max score : ", max_reg.score(max_test_X, max_test_Y))
+
+"""
+min score :  0.9953983838869879
+max score :  0.9793102117692366
+"""
+```
+
+```python
+#기존 data의 price를 변경할때 참고할 data를 만든다.
+test_result = test
+test_result['predict_min_price'] = min_reg.predict(min_test_X) 
+test_result['predict_max_price'] = max_reg.predict(max_test_X)
+
+#예측값들을 정수형태로 바꾼다.
+test_result['predict_min_price'] = test_result['predict_min_price'].apply((lambda x : int(x)))
+test_result['predict_max_price'] = test_result['predict_max_price'].apply((lambda x : int(x)))
+test_result = test_result.filter(['predict_max_price','predict_min_price','timestamp'])
+```
+
+```python
+# 현재 시점 이후 5분 최저값과 최고값을 예측하고 buy나 sell을 그 시점으로 미루어 하는것을 전제로 price값을 해당 price로 변경한다.
+# 기존의 data에서 price값을 예측한 값으로 변경하고 Task 1과 같은 방식으로 얼마나 이익을 보는지 확인한다.
+# sell의 경우에는 price를 maxprice로 바꾸고 buy의 경우에는 price를 minprice로 바꾼다
+trade = pd.read_csv('../Data/2018-07-trade.csv')
+for i in range(len(trade)):
+    t = trade['timestamp'][i]
+    predict_price = test_result[test_result['timestamp'].isin([t])]
+    if(len(predict_price)):
+        side = trade['side'][i]
+        if side == 0:
+            price = predict_price['predict_min_price'].min()
+            trade['price'][i] = price
+            trade['amount'][i] = -(trade['quantity'][i] * price)
+        else:
+            price = predict_price['predict_max_price'].min()
+            trade['price'][i] = price
+            trade['amount'][i] = trade['quantity'][i] * price
+```
+
+```python
+#Task 1에서 구한 기존 Data의 결과값
+print(trade['amount'].groupby(trade['side']).sum())
+# side
+# 0   -599313768
+# 1    599896414
+
+print(trade['amount'].sum())
+# 582646
+```
+
+```python
+#Task 4에서 최대 최소값을 예측해 해당 시점에서 사고 파는것을 가정하여 구한 결과값
+print(trade['amount'].groupby(trade['side']).sum())
+# side
+# 0   -596814930
+# 1    603112872
+
+print(trade['amount'].sum())
+# 6297942
+```
+
+* 예측값의 정확도가 높고 결과값도 큰 값이 나왔지만 특정 data에서만 최적화가 된 상태라고 생각해 다른 trade data에 적용했을때에도 이렇게 높은 수치를 보여주지는 않을것으로 예상.
+* orderbook의 price 중 최대값과 최솟값마다 제한된 quantity가 있을텐데 그 점을 고려하지 않아서 결과값이 더 높게 나왔을것으로 예상.
+
+* jupyter notebook으로 진행한 code들과 README파일을 github에 올려서 제출하겠습니다. 
+* 제출 마감 이후에 public으로 전환하도록 하겠습니다.
+* https://github.com/WAQESD/TakeHomeExam
